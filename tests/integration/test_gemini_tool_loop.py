@@ -11,25 +11,32 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.mark.asyncio
 async def test_gemini_tool_loop_requests_search_memories():
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 
     from mnemos_bridge_gemini import MnemosGeminiAdapter
 
-    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-
+    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
     adapter = await MnemosGeminiAdapter.connect(
         os.environ["MNEMOS_TEST_BASE"],
         os.getenv("MNEMOS_MCP_TOKEN", ""),
     )
 
     try:
-        model = genai.GenerativeModel(
-            os.getenv("MNEMOS_TEST_GEMINI_MODEL", "gemini-3-pro-preview"),
-            tools=await adapter.gemini_tools(),
-        )
-        chat = model.start_chat()
+        model_name = os.getenv("MNEMOS_TEST_GEMINI_MODEL", "gemini-2.0-flash")
+        config = types.GenerateContentConfig(tools=await adapter.gemini_tools())
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part(text="Search MNEMOS for memories about infrastructure")],
+            )
+        ]
 
-        response = chat.send_message("Search MNEMOS for memories about infrastructure")
+        response = await client.aio.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=config,
+        )
         parts = response.candidates[0].content.parts
         function_calls = [
             part.function_call
@@ -45,11 +52,18 @@ async def test_gemini_tool_loop_requests_search_memories():
             for function_call in function_calls
             if function_call.name == "search_memories"
         )
-        function_response = await adapter.handle_function_call(function_call)
-        final = chat.send_message(
-            genai.protos.Part(
-                function_response=genai.protos.FunctionResponse(**function_response)
+        function_response_part = await adapter.handle_function_call(function_call)
+        contents.append(response.candidates[0].content)
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[function_response_part],
             )
+        )
+        final = await client.aio.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=config,
         )
 
         # Some Gemini models chain another tool call instead of emitting

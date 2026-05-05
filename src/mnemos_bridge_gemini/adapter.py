@@ -7,6 +7,9 @@ import json
 from copy import deepcopy
 from typing import Any, Mapping
 
+from google import genai
+from google.genai import types
+
 try:  # pragma: no cover - exercised only when mnemos-bridge-core is installed.
     from mnemos_bridge_core import McpClient, ResultRenderer, SchemaTranslator
 except ImportError:  # pragma: no cover - offline tests patch these symbols.
@@ -14,10 +17,7 @@ except ImportError:  # pragma: no cover - offline tests patch these symbols.
     ResultRenderer = None  # type: ignore[assignment]
     SchemaTranslator = None  # type: ignore[assignment]
 
-try:  # pragma: no cover - optional at scaffold/test time.
-    from google.generativeai import protos
-except ImportError:  # pragma: no cover - offline tests use dict-shaped tools.
-    protos = None  # type: ignore[assignment]
+_GENAI_CLIENT_TYPE = genai.Client
 
 
 UNSUPPORTED_GEMINI_SCHEMA_KEYS = {
@@ -72,7 +72,7 @@ class MnemosGeminiAdapter:
         tools = await _fetch_tools(client)
         return cls(client, tools)
 
-    async def gemini_tools(self) -> list[Any]:
+    async def gemini_tools(self) -> list[types.Tool]:
         """Return Gemini Tool[] list with translated function declarations."""
 
         if not self._tools:
@@ -82,18 +82,9 @@ class MnemosGeminiAdapter:
         if not function_declarations:
             return []
 
-        # NOTE: Gemini SDK's GenerativeModel(tools=[...]) accepts dict-shaped
-        # tool definitions with snake_case keys. The proto path
-        # (protos.FunctionDeclaration(**decl)) doesn't work because Gemini's
-        # Schema proto requires Type enum values (e.g. Type.OBJECT) in place
-        # of JSON Schema strings ("object"); a one-shot **kwargs construction
-        # raises KeyError on the type field. Returning the snake_case dict
-        # form is the documented + supported public API for tool registration.
-        # The previous camelCase ("functionDeclarations") was rejected by the
-        # SDK with "Unknown field for FunctionDeclaration".
-        return [{"function_declarations": function_declarations}]
+        return [types.Tool(function_declarations=function_declarations)]
 
-    async def handle_function_call(self, fc: Any) -> dict[str, Any]:
+    async def handle_function_call(self, fc: Any) -> types.Part:
         """Dispatch a Gemini FunctionCall to MCP and return a response part payload."""
 
         name = _get_value(fc, "name")
@@ -104,10 +95,12 @@ class MnemosGeminiAdapter:
         result = await _maybe_await(self._client.call_tool(name, args))
         rendered = await _render_result_for_gemini(result)
 
-        return {
-            "name": name,
-            "response": {"result": rendered},
-        }
+        return types.Part(
+            function_response=types.FunctionResponse(
+                name=name,
+                response={"result": rendered},
+            )
+        )
 
     async def aclose(self) -> None:
         """Close the underlying MCP client connection."""
@@ -145,6 +138,10 @@ async def _connect_mcp_client(mcp_url: str, *, headers: dict[str, str], timeout:
             await aenter()
         return client
 
+    connector = getattr(McpClient, "connect", None)
+    if connector is not None:
+        return await connector(mcp_url, headers=headers, timeout=timeout)
+
     # Last-resort: direct constructor + open. Core's McpClient signature is
     # __init__(url, *, token, timeout).
     client = McpClient(mcp_url, token=token, timeout=timeout)
@@ -169,16 +166,16 @@ async def _fetch_tools(client: Any) -> list[Any]:
     return list(response or [])
 
 
-def _function_declaration_from_tool(tool: Any) -> dict[str, Any]:
+def _function_declaration_from_tool(tool: Any) -> types.FunctionDeclaration:
     name = _get_value(tool, "name")
     description = _get_value(tool, "description", "") or ""
     parameters = _translate_parameters(tool)
 
-    return {
-        "name": name,
-        "description": description,
-        "parameters": parameters,
-    }
+    return types.FunctionDeclaration(
+        name=name,
+        description=description,
+        parameters=types.Schema(**parameters),
+    )
 
 
 def _translate_parameters(tool: Any) -> dict[str, Any]:

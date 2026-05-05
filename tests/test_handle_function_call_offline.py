@@ -39,10 +39,9 @@ async def test_handle_function_call_accepts_dict_input(monkeypatch):
     )
 
     assert client.calls == [("search_memories", {"query": "infrastructure"})]
-    assert set(response) == {"name", "response"}
-    assert response["name"] == "search_memories"
-    assert response["response"]["result"]
-    assert "infrastructure" in response["response"]["result"]
+    assert response.function_response.name == "search_memories"
+    assert response.function_response.response["result"]
+    assert "infrastructure" in response.function_response.response["result"]
 
 
 @pytest.mark.asyncio
@@ -56,8 +55,7 @@ async def test_handle_function_call_accepts_dataclass_style_input(monkeypatch):
     )
 
     assert client.calls == [("read_memory", {"memory_id": "mem_123"})]
-    assert set(response) == {"name", "response"}
-    assert response["name"] == "read_memory"
-    assert "result" in response["response"]
-    assert isinstance(response["response"]["result"], str)
-    assert response["response"]["result"]
+    assert response.function_response.name == "read_memory"
+    assert "result" in response.function_response.response
+    assert isinstance(response.function_response.response["result"], str)
+    assert response.function_response.response["result"]

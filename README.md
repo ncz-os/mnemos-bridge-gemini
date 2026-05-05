@@ -5,19 +5,20 @@ Google Gemini adapter for the `mnemos-bridge-core` MCP bridge abstraction. It tr
 ## Install
 
 ```bash
-pip install mnemos-bridge-gemini
+pip install "mnemos-bridge-gemini>=0.2.0" "google-genai>=1.0"
 ```
 
 ## Quick Start
 
 ```python
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from mnemos_bridge_gemini import MnemosGeminiAdapter
 
 
 async def main() -> None:
-    genai.configure(api_key="...")
+    client = genai.Client(api_key="...")
 
     adapter = await MnemosGeminiAdapter.connect(
         "http://192.168.207.67:5003",
@@ -25,20 +26,31 @@ async def main() -> None:
     )
 
     try:
-        model = genai.GenerativeModel(
-            "gemini-3-pro-preview",
-            tools=await adapter.gemini_tools(),
-        )
-        chat = model.start_chat()
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part(text="Search MNEMOS for memories about infrastructure")],
+            )
+        ]
+        config = types.GenerateContentConfig(tools=await adapter.gemini_tools())
 
-        response = chat.send_message("Search MNEMOS for memories about infrastructure")
+        response = await client.aio.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=contents,
+            config=config,
+        )
         function_call = response.candidates[0].content.parts[0].function_call
 
-        function_response = await adapter.handle_function_call(function_call)
-        final = chat.send_message(
-            genai.protos.Part(
-                function_response=genai.protos.FunctionResponse(**function_response)
-            )
+        function_response_part = await adapter.handle_function_call(function_call)
+        contents.append(response.candidates[0].content)
+        contents.append(
+            types.Content(role="user", parts=[function_response_part])
+        )
+
+        final = await client.aio.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=contents,
+            config=config,
         )
         print(final.text)
     finally:
@@ -48,22 +60,27 @@ async def main() -> None:
 ## Multi-Turn Example
 
 ```python
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from mnemos_bridge_gemini import MnemosGeminiAdapter
 
 
 async def run_loop(prompt: str) -> str:
+    client = genai.Client(api_key="...")
+
     async with await MnemosGeminiAdapter.connect(
         "http://192.168.207.67:5003",
         "...mcp token...",
     ) as adapter:
-        model = genai.GenerativeModel(
-            "gemini-3-pro-preview",
-            tools=await adapter.gemini_tools(),
+        model = "gemini-2.0-flash"
+        config = types.GenerateContentConfig(tools=await adapter.gemini_tools())
+        contents = [types.Content(role="user", parts=[types.Part(text=prompt)])]
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config,
         )
-        chat = model.start_chat()
-        response = chat.send_message(prompt)
 
         for _ in range(8):
             parts = response.candidates[0].content.parts
@@ -78,15 +95,15 @@ async def run_loop(prompt: str) -> str:
 
             response_parts = []
             for function_call in function_calls:
-                function_response = await adapter.handle_function_call(function_call)
-                response_parts.append(
-                    genai.protos.Part(
-                        function_response=genai.protos.FunctionResponse(
-                            **function_response
-                        )
-                    )
-                )
-            response = chat.send_message(response_parts)
+                response_parts.append(await adapter.handle_function_call(function_call))
+
+            contents.append(response.candidates[0].content)
+            contents.append(types.Content(role="user", parts=response_parts))
+            response = await client.aio.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
 
         return response.text
 ```
@@ -99,17 +116,31 @@ Gemini function parameters use a strict JSON Schema subset. This adapter flatten
 
 When `mnemos_bridge_core.SchemaTranslator.to_gemini()` is available, the adapter delegates schema translation to it and then applies the same conservative cleanup pass. See the Gemini function calling documentation: https://ai.google.dev/gemini-api/docs/function-calling
 
+## v0.1 to v0.2 Migration
+
+Version 0.2.0 migrates from the deprecated `google-generativeai` package to the
+current `google-genai` package.
+
+- Replace `import google.generativeai as genai` with `from google import genai`
+  and import `types` from `google.genai`.
+- Replace `genai.configure(...)` and `genai.GenerativeModel(...)` with
+  `genai.Client(...)` and `client.aio.models.generate_content(...)`.
+- Pass tools through `types.GenerateContentConfig(tools=await adapter.gemini_tools())`.
+- `adapter.handle_function_call(...)` now returns a `types.Part` containing a
+  `types.FunctionResponse`; append it to the next user turn's `parts` list.
+
 ## Vertex AI Usage
 
 The same Gemini SDK flow can be used with Vertex AI credentials. Set `GOOGLE_APPLICATION_CREDENTIALS` to a service account JSON file and configure the SDK for Vertex AI:
 
 ```python
-import google.generativeai as genai
+from google import genai
 
-genai.configure(vertexai=True)
+client = genai.Client(vertexai=True, project="your-project", location="us-central1")
 ```
 
-Then construct `GenerativeModel` and pass `tools=await adapter.gemini_tools()` as in the examples above.
+Then use `client.aio.models.generate_content(...)` and pass tools through
+`types.GenerateContentConfig(tools=await adapter.gemini_tools())` as in the examples above.
 
 ## Testing
 
@@ -125,6 +156,6 @@ Run the guarded integration test by setting all required service environment var
 export GOOGLE_API_KEY=...
 export MNEMOS_TEST_BASE=http://192.168.207.67:5003
 export MNEMOS_MCP_TOKEN=...
-export MNEMOS_TEST_GEMINI_MODEL=gemini-3-pro-preview
+export MNEMOS_TEST_GEMINI_MODEL=gemini-2.0-flash
 pytest tests/integration/test_gemini_tool_loop.py
 ```
