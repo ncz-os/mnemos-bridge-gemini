@@ -34,6 +34,19 @@ packages = ["src/mnemos_bridge_gemini"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    # google-genai 1.x's aiohttp client subclasses ClientSession, which
+    # aiohttp itself deprecates. Not actionable from our code; the SDK
+    # owns it. Suppress so test output stays focused on actual signals.
+    "ignore:Inheritance class AiohttpClientSession from ClientSession is discouraged:DeprecationWarning",
+    # urllib3/chardet/charset_normalizer version mismatch — fires on any
+    # conda+pyproject mix; not specific to this bridge. The warning class
+    # is requests.RequestsDependencyWarning; both message-pattern and
+    # class-path filters listed for redundancy across requests versions.
+    "ignore:urllib3.*chardet.*charset_normalizer.*supported version",
+    "ignore::requests.RequestsDependencyWarning",
+    "ignore::requests.exceptions.RequestsDependencyWarning",
+]
 
 [tool.ruff]
 line-length = 100
