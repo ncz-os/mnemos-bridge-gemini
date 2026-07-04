@@ -1,3 +1,11 @@
+> # 📍 Moved to GitLab
+> **The canonical, authoritative home of this project is GitLab — always:**
+> ## 👉 https://gitlab.com/ncz-os/mnemos-bridge-gemini
+>
+> This GitHub repository is a **frozen, read-only mirror**. All development, issues, and releases happen on GitLab. Please open issues and merge requests there. The full history of this stub is preserved on GitLab.
+
+---
+
 # mnemos-bridge-gemini
 
 Google Gemini adapter for the `mnemos-bridge-core` MCP bridge abstraction. It translates MCP tool definitions into Gemini `functionDeclarations` and dispatches Gemini `functionCall` parts back to MCP tools.
