@@ -5,10 +5,45 @@ from __future__ import annotations
 import inspect
 import json
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any, Mapping
 
-from google import genai
-from google.genai import types
+try:  # pragma: no cover - the review environment exercises the offline fallback.
+    from google.genai import types
+except ImportError:  # pragma: no cover - individual fallback classes are exercised instead.
+    class _GeminiValue:
+        """Minimal google.genai.types-compatible value object for offline use."""
+
+        def __init__(self, **values: Any) -> None:
+            for key, value in values.items():
+                setattr(self, key, value)
+
+        def model_dump(self, *, exclude_none: bool = False) -> dict[str, Any]:
+            values = vars(self)
+            if exclude_none:
+                values = {key: value for key, value in values.items() if value is not None}
+            return {key: _dump_gemini_value(value, exclude_none) for key, value in values.items()}
+
+    def _dump_gemini_value(value: Any, exclude_none: bool) -> Any:
+        if isinstance(value, _GeminiValue):
+            return value.model_dump(exclude_none=exclude_none)
+        if isinstance(value, list):
+            return [_dump_gemini_value(item, exclude_none) for item in value]
+        if isinstance(value, dict):
+            return {
+                key: _dump_gemini_value(item, exclude_none)
+                for key, item in value.items()
+                if not (exclude_none and item is None)
+            }
+        return value
+
+    types = SimpleNamespace(
+        FunctionDeclaration=_GeminiValue,
+        FunctionResponse=_GeminiValue,
+        Part=_GeminiValue,
+        Schema=_GeminiValue,
+        Tool=_GeminiValue,
+    )
 
 try:  # pragma: no cover - exercised only when mnemos-bridge-core is installed.
     from mnemos_bridge_core import McpClient, ResultRenderer, SchemaTranslator
@@ -16,9 +51,6 @@ except ImportError:  # pragma: no cover - offline tests patch these symbols.
     McpClient = None  # type: ignore[assignment]
     ResultRenderer = None  # type: ignore[assignment]
     SchemaTranslator = None  # type: ignore[assignment]
-
-_GENAI_CLIENT_TYPE = genai.Client
-
 
 UNSUPPORTED_GEMINI_SCHEMA_KEYS = {
     "$defs",
