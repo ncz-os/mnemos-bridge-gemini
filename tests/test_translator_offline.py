@@ -176,3 +176,49 @@ async def test_connect_passes_bearer_header_and_required_arrays_are_preserved(mo
     assert declarations[2]["parameters"]["required"] == ["tag"]
     assert declarations[2]["parameters"]["properties"]["tag"] == {"type": "string"}
     assert "$defs" not in declarations[2]["parameters"]
+
+
+@pytest.mark.asyncio
+async def test_aclose_falls_back_to_async_context_exit():
+    class ContextManagedClient:
+        def __init__(self):
+            self.exit_args = None
+
+        async def __aexit__(self, *args):
+            self.exit_args = args
+
+    client = ContextManagedClient()
+    adapter = MnemosGeminiAdapter(client)
+
+    await adapter.aclose()
+
+    assert client.exit_args == (None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_connect_closes_client_when_initial_tool_discovery_fails(monkeypatch):
+    discovery_error = RuntimeError("tool discovery failed")
+
+    class FailingClient:
+        def __init__(self):
+            self.closed = False
+
+        async def list_tools(self):
+            raise discovery_error
+
+        async def aclose(self):
+            self.closed = True
+
+    client = FailingClient()
+
+    async def connect_client(*args, **kwargs):
+        return client
+
+    monkeypatch.setattr(adapter_mod, "McpClient", object())
+    monkeypatch.setattr(adapter_mod, "_connect_mcp_client", connect_client)
+
+    with pytest.raises(RuntimeError) as caught:
+        await MnemosGeminiAdapter.connect("http://mnemos.example", "secret-token")
+
+    assert caught.value is discovery_error
+    assert client.closed is True

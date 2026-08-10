@@ -69,7 +69,14 @@ class MnemosGeminiAdapter:
 
         headers = {"Authorization": f"Bearer {mcp_token}"}
         client = await _connect_mcp_client(mcp_url, headers=headers, timeout=timeout)
-        tools = await _fetch_tools(client)
+        try:
+            tools = await _fetch_tools(client)
+        except BaseException:
+            try:
+                await _close_mcp_client(client)
+            except BaseException:
+                pass
+            raise
         return cls(client, tools)
 
     async def gemini_tools(self) -> list[types.Tool]:
@@ -94,22 +101,27 @@ class MnemosGeminiAdapter:
         args = _coerce_args(_get_value(fc, "args", {}))
         result = await _maybe_await(self._client.call_tool(name, args))
         rendered = await _render_result_for_gemini(result)
+        is_error = _get_value(result, "is_error")
+        if is_error is None:
+            is_error = _get_value(result, "isError", False)
+
+        response = (
+            {"error": rendered, "is_error": True}
+            if is_error
+            else {"result": rendered}
+        )
 
         return types.Part(
             function_response=types.FunctionResponse(
                 name=name,
-                response={"result": rendered},
+                response=response,
             )
         )
 
     async def aclose(self) -> None:
         """Close the underlying MCP client connection."""
 
-        for method_name in ("aclose", "close", "disconnect"):
-            method = getattr(self._client, method_name, None)
-            if method is not None:
-                await _maybe_await(method())
-                return
+        await _close_mcp_client(self._client)
 
     async def __aenter__(self) -> "MnemosGeminiAdapter":
         return self
@@ -149,6 +161,18 @@ async def _connect_mcp_client(mcp_url: str, *, headers: dict[str, str], timeout:
     if aenter is not None:
         await aenter()
     return client
+
+
+async def _close_mcp_client(client: Any) -> None:
+    for method_name in ("aclose", "close", "disconnect"):
+        method = getattr(client, method_name, None)
+        if method is not None:
+            await _maybe_await(method())
+            return
+
+    aexit = getattr(client, "__aexit__", None)
+    if aexit is not None:
+        await _maybe_await(aexit(None, None, None))
 
 
 async def _fetch_tools(client: Any) -> list[Any]:
@@ -352,8 +376,11 @@ def _extract_rendered_text(rendered: Any) -> str | None:
         if "result" in rendered:
             return _stringify(rendered["result"])
         response = rendered.get("response")
-        if isinstance(response, Mapping) and "result" in response:
-            return _stringify(response["result"])
+        if isinstance(response, Mapping):
+            if "result" in response:
+                return _stringify(response["result"])
+            if "content" in response:
+                return _render_content_to_string(response)
         function_response = rendered.get("function_response") or rendered.get("functionResponse")
         if isinstance(function_response, Mapping):
             return _extract_rendered_text(function_response)

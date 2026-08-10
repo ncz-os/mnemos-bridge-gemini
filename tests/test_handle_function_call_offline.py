@@ -59,3 +59,42 @@ async def test_handle_function_call_accepts_dataclass_style_input(monkeypatch):
     assert "result" in response.function_response.response
     assert isinstance(response.function_response.response["result"], str)
     assert response.function_response.response["result"]
+
+
+@pytest.mark.asyncio
+async def test_handle_function_call_preserves_mcp_error_semantics(monkeypatch):
+    monkeypatch.setattr(adapter_mod, "ResultRenderer", None)
+
+    class ErrorClient:
+        async def call_tool(self, name, args):
+            return {"content": ["unauthorized"], "is_error": True}
+
+    adapter = MnemosGeminiAdapter(ErrorClient())
+    response = await adapter.handle_function_call({"name": "read_memory", "args": {}})
+
+    assert response.function_response.response == {
+        "error": "unauthorized",
+        "is_error": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_function_call_extracts_core_renderer_content(monkeypatch):
+    class CoreRenderer:
+        @staticmethod
+        def to_gemini_part(result):
+            return {
+                "functionResponse": {
+                    "response": {"content": ["memory found", "second line"]}
+                }
+            }
+
+    monkeypatch.setattr(adapter_mod, "ResultRenderer", CoreRenderer)
+    client = FakeMcpClient()
+    adapter = MnemosGeminiAdapter(client)
+
+    response = await adapter.handle_function_call({"name": "read_memory", "args": {}})
+
+    assert response.function_response.response == {
+        "result": "memory found\nsecond line"
+    }
