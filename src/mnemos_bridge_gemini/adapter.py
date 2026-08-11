@@ -10,11 +10,12 @@ from typing import Any, Mapping
 from google.genai import types
 
 try:  # pragma: no cover - exercised only when mnemos-bridge-core is installed.
-    from mnemos_bridge_core import McpClient, ResultRenderer, SchemaTranslator
+    from mnemos_bridge_core import McpClient, ResultRenderer, SchemaTranslator, ToolSchema
 except ImportError:  # pragma: no cover - offline tests patch these symbols.
     McpClient = None  # type: ignore[assignment]
     ResultRenderer = None  # type: ignore[assignment]
     SchemaTranslator = None  # type: ignore[assignment]
+    ToolSchema = None  # type: ignore[assignment,misc]
 
 UNSUPPORTED_GEMINI_SCHEMA_KEYS = {
     "$defs",
@@ -205,7 +206,7 @@ def _translate_parameters(tool: Any) -> dict[str, Any]:
     # schema is not reduced to an unconstrained empty object.
     resolved_schema = _resolve_local_refs(deepcopy(schema), deepcopy(schema))
     translated = _translate_with_core(
-        _tool_with_input_schema(tool, resolved_schema),
+        _tool_for_core_translation(tool, resolved_schema),
         resolved_schema,
     )
 
@@ -223,6 +224,18 @@ def _translate_parameters(tool: Any) -> dict[str, Any]:
     # Gemini accepts a strict JSON Schema subset. Flatten local nested $ref first so
     # removing definitions/$defs later does not leave dangling references behind.
     return _sanitize_gemini_schema(resolved_schema)
+
+
+def _tool_for_core_translation(tool: Any, schema: dict[str, Any]) -> Any:
+    """Normalize duck-typed tools to the bridge-core translator contract."""
+
+    if ToolSchema is not None:
+        return ToolSchema(
+            name=_get_value(tool, "name"),
+            description=_get_value(tool, "description", "") or "",
+            input_schema=schema,
+        )
+    return _tool_with_input_schema(tool, schema)
 
 
 def _tool_with_input_schema(tool: Any, schema: dict[str, Any]) -> Any:

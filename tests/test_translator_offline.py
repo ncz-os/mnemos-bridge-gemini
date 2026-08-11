@@ -218,6 +218,62 @@ def test_core_translation_receives_dereferenced_schema(monkeypatch):
     assert "$defs" not in translated
 
 
+@pytest.mark.parametrize(
+    "tool",
+    [
+        {
+            "name": "search_memories",
+            "description": "Search memories.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+        type(
+            "OfficialMcpToolShape",
+            (),
+            {
+                "name": "search_memories",
+                "description": "Search memories.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            },
+        )(),
+    ],
+    ids=["mapping", "mcp-inputSchema-object"],
+)
+def test_core_translation_normalizes_public_duck_typed_tools(monkeypatch, tool):
+    core_src = Path(__file__).resolve().parents[2] / "mnemos-bridge-core" / "src"
+    if not core_src.exists():
+        pytest.skip("adjacent mnemos-bridge-core checkout is unavailable")
+    sys.path.insert(0, str(core_src))
+    from mnemos_bridge_core import SchemaTranslator as CoreSchemaTranslator
+    from mnemos_bridge_core import ToolSchema as CoreToolSchema
+
+    monkeypatch.setattr(adapter_mod, "SchemaTranslator", CoreSchemaTranslator)
+    monkeypatch.setattr(adapter_mod, "ToolSchema", CoreToolSchema)
+
+    translated = adapter_mod._translate_parameters(tool)
+
+    assert translated == {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    }
+
+
+def test_documented_mnemos_endpoints_include_sse_route():
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+
+    assert readme.count("http://192.168.207.67:5003/sse") == 3
+    assert "http://192.168.207.67:5003\"" not in readme
+    assert "http://192.168.207.67:5003\n" not in readme
+
+
 @pytest.mark.asyncio
 async def test_aclose_falls_back_to_async_context_exit():
     class ContextManagedClient:

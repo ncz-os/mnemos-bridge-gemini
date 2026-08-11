@@ -21,7 +21,7 @@ async def main() -> None:
     client = genai.Client(api_key="...")
 
     adapter = await MnemosGeminiAdapter.connect(
-        "http://192.168.207.67:5003",
+        "http://192.168.207.67:5003/sse",
         "...mcp token...",
     )
 
@@ -70,7 +70,7 @@ async def run_loop(prompt: str) -> str:
     client = genai.Client(api_key="...")
 
     async with await MnemosGeminiAdapter.connect(
-        "http://192.168.207.67:5003",
+        "http://192.168.207.67:5003/sse",
         "...mcp token...",
     ) as adapter:
         model = "gemini-2.0-flash"
@@ -154,7 +154,7 @@ Run the guarded integration test by setting all required service environment var
 
 ```bash
 export GOOGLE_API_KEY=...
-export MNEMOS_TEST_BASE=http://192.168.207.67:5003
+export MNEMOS_TEST_BASE=http://192.168.207.67:5003/sse
 export MNEMOS_MCP_TOKEN=...
 export MNEMOS_TEST_GEMINI_MODEL=gemini-2.0-flash
 pytest tests/integration/test_gemini_tool_loop.py
