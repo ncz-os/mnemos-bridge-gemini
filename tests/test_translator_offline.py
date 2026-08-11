@@ -1,4 +1,6 @@
 from enum import Enum
+from pathlib import Path
+import sys
 from typing import Any
 
 import pytest
@@ -176,6 +178,44 @@ async def test_connect_passes_bearer_header_and_required_arrays_are_preserved(mo
     assert declarations[2]["parameters"]["required"] == ["tag"]
     assert declarations[2]["parameters"]["properties"]["tag"] == {"type": "string"}
     assert "$defs" not in declarations[2]["parameters"]
+
+
+@pytest.mark.asyncio
+async def test_connect_uses_default_timeout(monkeypatch):
+    monkeypatch.setattr(adapter_mod, "McpClient", FakeMcpClient)
+    monkeypatch.setattr(adapter_mod, "SchemaTranslator", None)
+
+    await MnemosGeminiAdapter.connect("http://mnemos.example", "secret-token")
+
+    assert FakeMcpClient.last_timeout == 30
+
+
+def test_core_translation_receives_dereferenced_schema(monkeypatch):
+    core_src = Path(__file__).resolve().parents[2] / "mnemos-bridge-core" / "src"
+    if not core_src.exists():
+        pytest.skip("adjacent mnemos-bridge-core checkout is unavailable")
+    sys.path.insert(0, str(core_src))
+    from mnemos_bridge_core import SchemaTranslator as CoreSchemaTranslator
+    from mnemos_bridge_core import ToolSchema
+
+    source_schema = {
+        "type": "object",
+        "properties": {"tag": {"$ref": "#/$defs/tag"}},
+        "$defs": {"tag": {"type": "string"}},
+        "required": ["tag"],
+    }
+    monkeypatch.setattr(adapter_mod, "SchemaTranslator", CoreSchemaTranslator)
+
+    translated = adapter_mod._translate_parameters(
+        ToolSchema(
+            name="tag_memory",
+            description="Tag a memory.",
+            input_schema=source_schema,
+        )
+    )
+
+    assert translated["properties"]["tag"] == {"type": "string"}
+    assert "$defs" not in translated
 
 
 @pytest.mark.asyncio

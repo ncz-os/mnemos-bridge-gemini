@@ -13,7 +13,8 @@ authors = [
   { name = "MNEMOS Bridge Maintainers" }
 ]
 dependencies = [
-  "mnemos-bridge-core>=0.1.0",
+  "mnemos-bridge-core>=0.1.3",
+  "mcp>=1.0,<2",
   "google-genai>=1.0",
   "httpx>=0.27",
   "pydantic>=2.8",

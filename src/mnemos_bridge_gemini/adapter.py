@@ -4,46 +4,10 @@ from __future__ import annotations
 
 import inspect
 import json
-from copy import deepcopy
-from types import SimpleNamespace
+from copy import copy, deepcopy
 from typing import Any, Mapping
 
-try:  # pragma: no cover - the review environment exercises the offline fallback.
-    from google.genai import types
-except ImportError:  # pragma: no cover - individual fallback classes are exercised instead.
-    class _GeminiValue:
-        """Minimal google.genai.types-compatible value object for offline use."""
-
-        def __init__(self, **values: Any) -> None:
-            for key, value in values.items():
-                setattr(self, key, value)
-
-        def model_dump(self, *, exclude_none: bool = False) -> dict[str, Any]:
-            values = vars(self)
-            if exclude_none:
-                values = {key: value for key, value in values.items() if value is not None}
-            return {key: _dump_gemini_value(value, exclude_none) for key, value in values.items()}
-
-    def _dump_gemini_value(value: Any, exclude_none: bool) -> Any:
-        if isinstance(value, _GeminiValue):
-            return value.model_dump(exclude_none=exclude_none)
-        if isinstance(value, list):
-            return [_dump_gemini_value(item, exclude_none) for item in value]
-        if isinstance(value, dict):
-            return {
-                key: _dump_gemini_value(item, exclude_none)
-                for key, item in value.items()
-                if not (exclude_none and item is None)
-            }
-        return value
-
-    types = SimpleNamespace(
-        FunctionDeclaration=_GeminiValue,
-        FunctionResponse=_GeminiValue,
-        Part=_GeminiValue,
-        Schema=_GeminiValue,
-        Tool=_GeminiValue,
-    )
+from google.genai import types
 
 try:  # pragma: no cover - exercised only when mnemos-bridge-core is installed.
     from mnemos_bridge_core import McpClient, ResultRenderer, SchemaTranslator
@@ -236,22 +200,51 @@ def _function_declaration_from_tool(tool: Any) -> types.FunctionDeclaration:
 
 def _translate_parameters(tool: Any) -> dict[str, Any]:
     schema = _extract_input_schema(tool)
-    translated = _translate_with_core(tool, schema)
+    # Core strips unsupported keywords, including $ref and $defs. Resolve local
+    # references on the source schema before handing it to core so the target
+    # schema is not reduced to an unconstrained empty object.
+    resolved_schema = _resolve_local_refs(deepcopy(schema), deepcopy(schema))
+    translated = _translate_with_core(
+        _tool_with_input_schema(tool, resolved_schema),
+        resolved_schema,
+    )
 
     if isinstance(translated, Mapping):
         translated = dict(translated)
         if "parameters" in translated:
-            schema = translated["parameters"]
+            resolved_schema = translated["parameters"]
         elif "functionDeclarations" in translated:
             declarations = translated.get("functionDeclarations") or []
             if declarations:
-                schema = declarations[0].get("parameters", schema)
+                resolved_schema = declarations[0].get("parameters", resolved_schema)
         else:
-            schema = translated
+            resolved_schema = translated
 
     # Gemini accepts a strict JSON Schema subset. Flatten local nested $ref first so
     # removing definitions/$defs later does not leave dangling references behind.
-    return _sanitize_gemini_schema(schema)
+    return _sanitize_gemini_schema(resolved_schema)
+
+
+def _tool_with_input_schema(tool: Any, schema: dict[str, Any]) -> Any:
+    """Return a shallow tool copy carrying a dereferenced input schema."""
+
+    if isinstance(tool, Mapping):
+        updated = dict(tool)
+        key = "input_schema" if "input_schema" in updated else "inputSchema"
+        updated[key] = schema
+        return updated
+
+    schema_key = "input_schema" if hasattr(tool, "input_schema") else "inputSchema"
+    model_copy = getattr(tool, "model_copy", None)
+    if model_copy is not None:
+        return model_copy(update={schema_key: schema})
+
+    try:
+        updated = copy(tool)
+        setattr(updated, schema_key, schema)
+        return updated
+    except (AttributeError, TypeError):
+        return tool
 
 
 def _translate_with_core(tool: Any, schema: dict[str, Any]) -> Any:
