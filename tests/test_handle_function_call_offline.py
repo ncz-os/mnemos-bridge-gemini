@@ -45,6 +45,22 @@ async def test_handle_function_call_accepts_dict_input(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_handle_function_call_preserves_function_call_id(monkeypatch):
+    monkeypatch.setattr(adapter_mod, "ResultRenderer", None)
+    adapter = MnemosGeminiAdapter(FakeMcpClient())
+
+    response = await adapter.handle_function_call(
+        {
+            "id": "call-42",
+            "name": "search_memories",
+            "args": {"query": "infrastructure"},
+        }
+    )
+
+    assert response.function_response.id == "call-42"
+
+
+@pytest.mark.asyncio
 async def test_handle_function_call_accepts_dataclass_style_input(monkeypatch):
     monkeypatch.setattr(adapter_mod, "ResultRenderer", None)
     client = FakeMcpClient()

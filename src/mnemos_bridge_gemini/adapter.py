@@ -110,6 +110,7 @@ class MnemosGeminiAdapter:
 
         return types.Part(
             function_response=types.FunctionResponse(
+                id=_get_value(fc, "id"),
                 name=name,
                 response=response,
             )
@@ -201,25 +202,11 @@ def _function_declaration_from_tool(tool: Any) -> types.FunctionDeclaration:
 
 def _translate_parameters(tool: Any) -> dict[str, Any]:
     schema = _extract_input_schema(tool)
-    # Core strips unsupported keywords, including $ref and $defs. Resolve local
-    # references on the source schema before handing it to core so the target
-    # schema is not reduced to an unconstrained empty object.
+    # Resolve local references before stripping definitions so the target schema
+    # does not contain dangling references. Sanitize the source schema directly:
+    # bridge-core's legacy Gemini whitelist drops constraints supported by the
+    # google-genai SDK, including bounds and defaults.
     resolved_schema = _resolve_local_refs(deepcopy(schema), deepcopy(schema))
-    translated = _translate_with_core(
-        _tool_for_core_translation(tool, resolved_schema),
-        resolved_schema,
-    )
-
-    if isinstance(translated, Mapping):
-        translated = dict(translated)
-        if "parameters" in translated:
-            resolved_schema = translated["parameters"]
-        elif "functionDeclarations" in translated:
-            declarations = translated.get("functionDeclarations") or []
-            if declarations:
-                resolved_schema = declarations[0].get("parameters", resolved_schema)
-        else:
-            resolved_schema = translated
 
     # Gemini accepts a strict JSON Schema subset. Flatten local nested $ref first so
     # removing definitions/$defs later does not leave dangling references behind.

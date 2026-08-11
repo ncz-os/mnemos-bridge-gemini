@@ -218,6 +218,51 @@ def test_core_translation_receives_dereferenced_schema(monkeypatch):
     assert "$defs" not in translated
 
 
+def test_translation_preserves_gemini_supported_constraints_with_core_installed(monkeypatch):
+    core_src = Path(__file__).resolve().parents[2] / "mnemos-bridge-core" / "src"
+    if not core_src.exists():
+        pytest.skip("adjacent mnemos-bridge-core checkout is unavailable")
+    sys.path.insert(0, str(core_src))
+    from mnemos_bridge_core import SchemaTranslator as CoreSchemaTranslator
+    from mnemos_bridge_core import ToolSchema
+
+    monkeypatch.setattr(adapter_mod, "SchemaTranslator", CoreSchemaTranslator)
+    translated = adapter_mod._translate_parameters(
+        ToolSchema(
+            name="list_memories",
+            description="List memories.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 20,
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1, "maxLength": 50},
+                        "maxItems": 10,
+                    },
+                },
+            },
+        )
+    )
+
+    assert translated["properties"]["limit"] == {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500,
+        "default": 20,
+    }
+    assert translated["properties"]["tags"] == {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1, "maxLength": 50},
+        "maxItems": 10,
+    }
+
+
 @pytest.mark.parametrize(
     "tool",
     [
