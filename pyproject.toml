@@ -1,5 +1,4 @@
 [build-system]
-requires = ["setuptools>=77"]
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
