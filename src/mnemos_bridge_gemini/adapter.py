@@ -42,7 +42,10 @@ class MnemosGeminiAdapter:
 
     def __init__(self, client: Any, tools: list[Any] | None = None) -> None:
         self._client = client
-        self._tools = list(tools or [])
+        self._tools: list[Any] | None = None
+        self._allowed_tool_names: frozenset[str] | None = None
+        if tools is not None:
+            self._set_tools(tools)
 
     @classmethod
     async def connect(
@@ -79,8 +82,8 @@ class MnemosGeminiAdapter:
     async def gemini_tools(self) -> list[types.Tool]:
         """Return Gemini Tool[] list with translated function declarations."""
 
-        if not self._tools:
-            self._tools = await _fetch_tools(self._client)
+        if self._tools is None:
+            self._set_tools(await _fetch_tools(self._client))
 
         function_declarations = [_function_declaration_from_tool(tool) for tool in self._tools]
         if not function_declarations:
@@ -94,6 +97,8 @@ class MnemosGeminiAdapter:
         name = _get_value(fc, "name")
         if not name:
             raise ValueError("Gemini function call is missing a name.")
+
+        self._assert_tool_allowed(name)
 
         args = _coerce_args(_get_value(fc, "args", {}))
         result = await _maybe_await(self._client.call_tool(name, args))
@@ -115,6 +120,25 @@ class MnemosGeminiAdapter:
                 response=response,
             )
         )
+
+    def _set_tools(self, tools: list[Any]) -> None:
+        """Store the advertised tools and initialize their dispatch allowlist."""
+
+        self._tools = list(tools)
+        self._allowed_tool_names = frozenset(
+            str(name) for name in (_get_value(tool, "name") for tool in self._tools) if name
+        )
+
+    def _assert_tool_allowed(self, name: Any) -> None:
+        """Refuse calls outside an initialized advertised-tool allowlist."""
+
+        if self._allowed_tool_names is None:
+            return
+        if str(name) not in self._allowed_tool_names:
+            raise ValueError(
+                f"Gemini requested tool {name!r}, which is not in this adapter's "
+                "declared tool set; refusing to dispatch it to MCP."
+            )
 
     async def aclose(self) -> None:
         """Close the underlying MCP client connection."""

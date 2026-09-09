@@ -78,6 +78,43 @@ async def test_handle_function_call_accepts_dataclass_style_input(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_explicit_tool_allowlist_rejects_undeclared_tool(monkeypatch):
+    monkeypatch.setattr(adapter_mod, "ResultRenderer", None)
+    client = FakeMcpClient()
+    adapter = MnemosGeminiAdapter(client, tools=[{"name": "read_memory"}])
+
+    with pytest.raises(ValueError, match="not in this adapter's declared tool set"):
+        await adapter.handle_function_call({"name": "delete_memory", "args": {}})
+
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_connect_tool_allowlist_rejects_undeclared_tool(monkeypatch):
+    class ConnectedClient(FakeMcpClient):
+        async def list_tools(self):
+            return [{"name": "read_memory"}]
+
+    client = ConnectedClient()
+
+    async def connect_client(*args, **kwargs):
+        return client
+
+    monkeypatch.setattr(adapter_mod, "McpClient", object())
+    monkeypatch.setattr(adapter_mod, "_connect_mcp_client", connect_client)
+
+    adapter = await MnemosGeminiAdapter.connect(
+        "http://mnemos.example",
+        "secret-token",
+    )
+
+    with pytest.raises(ValueError, match="not in this adapter's declared tool set"):
+        await adapter.handle_function_call({"name": "delete_memory", "args": {}})
+
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
 async def test_handle_function_call_preserves_mcp_error_semantics(monkeypatch):
     monkeypatch.setattr(adapter_mod, "ResultRenderer", None)
 
