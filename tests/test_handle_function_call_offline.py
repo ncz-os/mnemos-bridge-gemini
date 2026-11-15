@@ -151,3 +151,44 @@ async def test_handle_function_call_extracts_core_renderer_content(monkeypatch):
     assert response.function_response.response == {
         "result": "memory found\nsecond line"
     }
+
+
+class McpError(Exception):
+    """Test stand-in for the core/MCP transport error type."""
+
+
+@pytest.mark.asyncio
+async def test_handle_function_call_returns_error_part_on_mcp_failure(monkeypatch):
+    monkeypatch.setattr(adapter_mod, "ResultRenderer", None)
+
+    class FailingClient:
+        async def call_tool(self, name, args):
+            raise McpError("boom: connection reset")
+
+    adapter = MnemosGeminiAdapter(FailingClient())
+    response = await adapter.handle_function_call(
+        {"id": "call-7", "name": "read_memory", "args": {}}
+    )
+
+    assert response.function_response.id == "call-7"
+    assert response.function_response.name == "read_memory"
+    payload = response.function_response.response
+    assert payload["is_error"] is True
+    assert "boom: connection reset" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_handle_function_call_returns_error_part_on_timeout(monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(adapter_mod, "ResultRenderer", None)
+
+    class TimeoutClient:
+        async def call_tool(self, name, args):
+            raise asyncio.TimeoutError("timed out")
+
+    adapter = MnemosGeminiAdapter(TimeoutClient())
+    response = await adapter.handle_function_call({"name": "read_memory", "args": {}})
+
+    assert response.function_response.response["is_error"] is True
+    assert "timed out" in response.function_response.response["error"]

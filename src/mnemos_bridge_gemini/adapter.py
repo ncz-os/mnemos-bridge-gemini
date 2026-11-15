@@ -57,9 +57,9 @@ class MnemosGeminiAdapter:
     ) -> "MnemosGeminiAdapter":
         """Connect to MNEMOS MCP HTTP/SSE endpoint and fetch available tools.
 
-        TODO: This assumes ``mnemos_bridge_core.McpClient`` accepts either an async
-        ``connect(url, headers=..., timeout=...)`` factory or constructor arguments with
-        the same values. Adjust the call path if the core package exposes a narrower API.
+        Opens the session via ``McpClient.open_from_url`` when available,
+        falling back to ``from_url``/``connect``/constructor paths on older
+        core builds (see ``_connect_mcp_client``).
         """
 
         if McpClient is None:
@@ -101,7 +101,10 @@ class MnemosGeminiAdapter:
         self._assert_tool_allowed(name)
 
         args = _coerce_args(_get_value(fc, "args", {}))
-        result = await _maybe_await(self._client.call_tool(name, args))
+        try:
+            result = await _maybe_await(self._client.call_tool(name, args))
+        except Exception as exc:
+            return _error_response_part(fc, name, exc)
         rendered = await _render_result_for_gemini(result)
         is_error = _get_value(result, "is_error")
         if is_error is None:
@@ -380,6 +383,18 @@ def _strip_unsupported_schema_keys(value: Any) -> Any:
         }
 
     return value
+
+
+def _error_response_part(fc: Any, name: Any, exc: BaseException) -> types.Part:
+    """Build a Gemini FunctionResponse part reporting an MCP failure."""
+
+    return types.Part(
+        function_response=types.FunctionResponse(
+            id=_get_value(fc, "id"),
+            name=name,
+            response={"error": _stringify(exc), "is_error": True},
+        )
+    )
 
 
 async def _render_result_for_gemini(result: Any) -> str:
