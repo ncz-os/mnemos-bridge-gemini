@@ -386,13 +386,20 @@ def _strip_unsupported_schema_keys(value: Any) -> Any:
 
 
 def _error_response_part(fc: Any, name: Any, exc: BaseException) -> types.Part:
-    """Build a Gemini FunctionResponse part reporting an MCP failure."""
+    """Build a Gemini FunctionResponse part reporting an MCP failure.
 
+    The ``error`` field carries a single, human-readable string. The
+    exception type is kept separately in ``error_type`` so the client can
+    distinguish transport failures from other failures without parsing
+    message text.
+    """
+
+    response = {"error": _stringify(exc), "is_error": True, "error_type": type(exc).__name__}
     return types.Part(
         function_response=types.FunctionResponse(
             id=_get_value(fc, "id"),
             name=name,
-            response={"error": _stringify(exc), "is_error": True},
+            response=response,
         )
     )
 

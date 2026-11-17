@@ -175,6 +175,7 @@ async def test_handle_function_call_returns_error_part_on_mcp_failure(monkeypatc
     payload = response.function_response.response
     assert payload["is_error"] is True
     assert "boom: connection reset" in payload["error"]
+    assert payload["error_type"] == "McpError"
 
 
 @pytest.mark.asyncio
@@ -192,3 +193,4 @@ async def test_handle_function_call_returns_error_part_on_timeout(monkeypatch):
 
     assert response.function_response.response["is_error"] is True
     assert "timed out" in response.function_response.response["error"]
+    assert response.function_response.response["error_type"] == "TimeoutError"
